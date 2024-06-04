@@ -1,22 +1,30 @@
 const express = require("express");
-const apiRouter = require("./routers/app.router");
 
 const {
+  invalidPath,
   handleCustomErrors,
-  handlePsqlErrors,
-  handleServerErrors,
-  handle404s,
-} = require("./errors/errors");
+  handlePSQLErrors,
+  handle500Errors,
+} = require("./controllers/errors.controller");
+const apiRouter = require("./routes/api-router");
 
 const app = express();
 
+//connection to allow connections
+
+//middleware connections
 app.use(express.json());
 
+//middleware routes
 app.use("/api", apiRouter);
 
-app.all("*", handle404s);
+//error handling
+
 app.use(handleCustomErrors);
-app.use(handlePsqlErrors);
-app.use(handleServerErrors);
+app.use(handlePSQLErrors);
+app.use(handle500Errors);
+
+//invalid path catcher
+app.use("/*", invalidPath);
 
 module.exports = app;

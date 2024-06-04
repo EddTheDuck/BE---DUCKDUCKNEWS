@@ -1,98 +1,119 @@
 const format = require("pg-format");
 const db = require("../connection");
-
 const {
-  formatTopicsData,
-  formatUsersData,
-  formatArticlesData,
-  formatCommentsData,
-} = require("../utils/seed-formatting");
+  convertTimestampToDate,
+  createRef,
+  formatComments,
+} = require("./utils");
 
-const seed = (data) => {
-  const { articleData, commentData, topicData, userData } = data;
-
-  return (
-    db
-      .query("DROP TABLE IF EXISTS comments;")
-      .then(() => db.query("DROP TABLE IF EXISTS articles;"))
-      .then(() => db.query("DROP TABLE IF EXISTS users;"))
-      .then(() => db.query("DROP TABLE IF EXISTS topics;"))
-
-      .then(() =>
-        db.query(`
+const seed = ({ topicData, userData, articleData, commentData }) => {
+  return db
+    .query(`DROP TABLE IF EXISTS comments;`)
+    .then(() => {
+      return db.query(`DROP TABLE IF EXISTS articles;`);
+    })
+    .then(() => {
+      return db.query(`DROP TABLE IF EXISTS users;`);
+    })
+    .then(() => {
+      return db.query(`DROP TABLE IF EXISTS topics;`);
+    })
+    .then(() => {
+      const topicsTablePromise = db.query(`
       CREATE TABLE topics (
-        slug TEXT NOT NULL,
-        description TEXT,
-        PRIMARY KEY(slug)
-      );`)
-      )
-      .then(() =>
-        db.query(`
+        slug VARCHAR PRIMARY KEY,
+        description VARCHAR
+      );`);
+
+      const usersTablePromise = db.query(`
       CREATE TABLE users (
-        username TEXT NOT NULL,
-        name TEXT NOT NULL,
-        avatar_url TEXT,
-        PRIMARY KEY(username)
-      );`)
-      )
-      .then(() =>
-        db.query(`
+        username VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL,
+        avatar_url VARCHAR
+      );`);
+
+      return Promise.all([topicsTablePromise, usersTablePromise]);
+    })
+    .then(() => {
+      return db.query(`
       CREATE TABLE articles (
         article_id SERIAL PRIMARY KEY,
-        title TEXT NOT NULL,
-        topic TEXT REFERENCES topics(slug),
-        author TEXT REFERENCES users(username),
-        body TEXT,
+        title VARCHAR NOT NULL,
+        topic VARCHAR NOT NULL REFERENCES topics(slug),
+        author VARCHAR NOT NULL REFERENCES users(username),
+        body VARCHAR NOT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
-        votes INT DEFAULT 0 NOT NULL
-      );`)
-      )
-      .then(() =>
-        db.query(`
+        votes INT DEFAULT 0 NOT NULL,
+        article_img_url VARCHAR DEFAULT 'https://images.pexels.com/photos/97050/pexels-photo-97050.jpeg?w=700&h=700'
+      );`);
+    })
+    .then(() => {
+      return db.query(`
       CREATE TABLE comments (
         comment_id SERIAL PRIMARY KEY,
-        body TEXT NOT NULL,
+        body VARCHAR NOT NULL,
+        article_id INT REFERENCES articles(article_id) NOT NULL,
+        author VARCHAR REFERENCES users(username) NOT NULL,
         votes INT DEFAULT 0 NOT NULL,
-        author TEXT REFERENCES users(username) NOT NULL,
-        article_id INT REFERENCES articles(article_id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT NOW()
-      );`)
-      )
+      );`);
+    })
+    .then(() => {
+      const insertTopicsQueryStr = format(
+        "INSERT INTO topics (slug, description) VALUES %L;",
+        topicData.map(({ slug, description }) => [slug, description])
+      );
+      const topicsPromise = db.query(insertTopicsQueryStr);
 
-      // Seed the 4 tables with data
-      .then(() => {
-        const formattedTopics = formatTopicsData(topicData);
-        const sqlString = format(
-          "INSERT INTO topics (description, slug) VALUES %L RETURNING *;",
-          formattedTopics
-        );
-        return db.query(sqlString);
-      })
-      .then(() => {
-        const formattedUsers = formatUsersData(userData);
-        const sqlString = format(
-          "INSERT INTO users (username, name, avatar_url) VALUES %L RETURNING *;",
-          formattedUsers
-        );
-        return db.query(sqlString);
-      })
-      .then(() => {
-        const formattedArticles = formatArticlesData(articleData);
-        const sqlString = format(
-          "INSERT INTO articles (title, topic, author, body, created_at, votes) VALUES %L RETURNING *;",
-          formattedArticles
-        );
-        return db.query(sqlString);
-      })
-      .then(() => {
-        const formattedComments = formatCommentsData(commentData);
-        const sqlString = format(
-          "INSERT INTO comments (body, votes, author, article_id, created_at) VALUES %L RETURNING *;",
-          formattedComments
-        );
-        return db.query(sqlString);
-      })
-  );
+      const insertUsersQueryStr = format(
+        "INSERT INTO users ( username, name, avatar_url) VALUES %L;",
+        userData.map(({ username, name, avatar_url }) => [
+          username,
+          name,
+          avatar_url,
+        ])
+      );
+      const usersPromise = db.query(insertUsersQueryStr);
+
+      return Promise.all([topicsPromise, usersPromise]);
+    })
+    .then(() => {
+      const formattedArticleData = articleData.map(convertTimestampToDate);
+      const insertArticlesQueryStr = format(
+        "INSERT INTO articles (title, topic, author, body, created_at, votes, article_img_url) VALUES %L RETURNING *;",
+        formattedArticleData.map(
+          ({
+            title,
+            topic,
+            author,
+            body,
+            created_at,
+            votes = 0,
+            article_img_url,
+          }) => [title, topic, author, body, created_at, votes, article_img_url]
+        )
+      );
+
+      return db.query(insertArticlesQueryStr);
+    })
+    .then(({ rows: articleRows }) => {
+      const articleIdLookup = createRef(articleRows, "title", "article_id");
+      const formattedCommentData = formatComments(commentData, articleIdLookup);
+
+      const insertCommentsQueryStr = format(
+        "INSERT INTO comments (body, author, article_id, votes, created_at) VALUES %L;",
+        formattedCommentData.map(
+          ({ body, author, article_id, votes = 0, created_at }) => [
+            body,
+            author,
+            article_id,
+            votes,
+            created_at,
+          ]
+        )
+      );
+      return db.query(insertCommentsQueryStr);
+    });
 };
 
 module.exports = seed;
