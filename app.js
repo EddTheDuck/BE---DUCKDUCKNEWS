@@ -1,9 +1,22 @@
-const { getTopics, getArticleById } = require("./controller/controller");
 const express = require("express");
+const apiRouter = require("./routers/app.router");
+
+const {
+  handleCustomErrors,
+  handlePsqlErrors,
+  handleServerErrors,
+  handle404s,
+} = require("./errors/errors");
 
 const app = express();
 
-app.get("/api/topics", getTopics);
-app.get("/api/articles/:article_id", getArticleById);
+app.use(express.json());
+
+app.use("/api", apiRouter);
+
+app.all("*", handle404s);
+app.use(handleCustomErrors);
+app.use(handlePsqlErrors);
+app.use(handleServerErrors);
 
 module.exports = app;
